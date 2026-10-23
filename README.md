@@ -65,6 +65,10 @@ O projeto é estruturado nos seguintes fluxos principais:
 
 ---
 
-## 📄 Licença
+## 📄 Responsáveis
 
-Este projeto está sob a licença MIT. Sinta-se à vontade para contribuir!
+    André Bastos dos Santos
+    André Filipi da Silveira de Sousa
+    Larissa da Silva Maschio
+    Pedro Henrique Gomes dos Santos
+
