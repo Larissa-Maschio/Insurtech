@@ -1,0 +1,432 @@
+// Modelo de dados da Seguradora de Celular.
+// Convenções: valores monetários em centavos (Int), percentuais em basis points (1% = 100 bps),
+// datas em UTC (DateTime), enums em português conforme docs/regras-de-negocio.md.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CUSTOMER
+  ADMIN
+}
+
+enum CoverageCode {
+  ROUBO
+  FURTO_QUALIFICADO
+  QUEBRA_ACIDENTAL
+  DANO_LIQUIDO
+  FURTO_SIMPLES
+}
+
+enum PolicyStatus {
+  AGUARDANDO_PAGAMENTO
+  ATIVA
+  SUSPENSA
+  CANCELADA
+  ENCERRADA
+}
+
+enum SubscriptionStatus {
+  PENDENTE
+  ATIVA
+  INADIMPLENTE
+  SUSPENSA
+  CANCELADA
+}
+
+enum PaymentStatus {
+  PENDENTE
+  APROVADO
+  RECUSADO
+  EXPIRADO
+}
+
+enum PaymentMethod {
+  PIX
+  CARTAO
+}
+
+enum PaymentPurpose {
+  MENSALIDADE
+  FRANQUIA
+}
+
+enum ClaimStatus {
+  ABERTO
+  EM_ANALISE
+  APROVADO
+  NEGADO
+  AGUARDANDO_FRANQUIA
+  CONCLUIDO
+}
+
+enum TicketStatus {
+  ABERTO
+  EM_ANDAMENTO
+  RESOLVIDO
+}
+
+enum TicketCategory {
+  COTACAO
+  PAGAMENTO
+  APOLICE
+  SINISTRO
+  OUTROS
+}
+
+enum FeedbackStatus {
+  PENDENTE
+  APROVADO
+  REJEITADO
+}
+
+model User {
+  id              String    @id @default(uuid())
+  name            String    @db.VarChar(120)
+  email           String    @unique @db.VarChar(160)
+  cpf             String    @unique @db.Char(11)
+  phone           String    @db.VarChar(20)
+  passwordHash    String    @map("password_hash")
+  role            Role      @default(CUSTOMER)
+  termsAcceptedAt DateTime  @map("terms_accepted_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  refreshTokens  RefreshToken[]
+  passwordResets PasswordReset[]
+  devices        Device[]
+  policies       Policy[]
+  claims         Claim[]
+  claimEvents    ClaimEvent[]
+  tickets        Ticket[]
+  ticketMessages TicketMessage[]
+  feedbacks      Feedback[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash") @db.Char(64)
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model PasswordReset {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash") @db.Char(64)
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_resets")
+}
+
+/// Tabela de referência de modelos aceitos e seus valores (RN04).
+model DeviceModel {
+  id          Int    @id @default(autoincrement())
+  brand       String @db.VarChar(60)
+  model       String @db.VarChar(120)
+  releaseYear Int    @map("release_year")
+  valueCents  Int    @map("value_cents")
+
+  @@unique([brand, model])
+  @@map("device_models")
+}
+
+model Device {
+  id         String   @id @default(uuid())
+  imei       String   @db.Char(15)
+  brand      String   @db.VarChar(60)
+  model      String   @db.VarChar(120)
+  valueCents Int      @map("value_cents")
+  ownerId    String   @map("owner_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+  owner      User     @relation(fields: [ownerId], references: [id])
+  policies   Policy[]
+
+  @@index([imei])
+  @@map("devices")
+}
+
+model Plan {
+  id              String         @id @default(uuid())
+  code            String         @unique @db.VarChar(30)
+  name            String         @db.VarChar(60)
+  description     String         @db.VarChar(255)
+  monthlyRateBps  Int            @map("monthly_rate_bps")
+  sortOrder       Int            @default(0) @map("sort_order")
+  active          Boolean        @default(true)
+  coverages       PlanCoverage[]
+  quoteItems      QuoteItem[]
+  policies        Policy[]
+  pendingSubs     Subscription[] @relation("PendingPlan")
+
+  @@map("plans")
+}
+
+model Coverage {
+  id              String         @id @default(uuid())
+  code            CoverageCode   @unique
+  name            String         @db.VarChar(80)
+  description     String         @db.VarChar(255)
+  gracePeriodDays Int            @map("grace_period_days")
+  plans           PlanCoverage[]
+
+  @@map("coverages")
+}
+
+model PlanCoverage {
+  planId        String   @map("plan_id")
+  coverageId    String   @map("coverage_id")
+  deductibleBps Int      @map("deductible_bps")
+  plan          Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+  coverage      Coverage @relation(fields: [coverageId], references: [id], onDelete: Cascade)
+
+  @@id([planId, coverageId])
+  @@map("plan_coverages")
+}
+
+model ImeiLookup {
+  imei        String   @id @db.Char(15)
+  brand       String?  @db.VarChar(60)
+  model       String?  @db.VarChar(120)
+  blacklisted Boolean
+  fetchedAt   DateTime @map("fetched_at")
+
+  @@map("imei_lookups")
+}
+
+model Quote {
+  id               String      @id @default(uuid())
+  imei             String      @db.Char(15)
+  brand            String      @db.VarChar(60)
+  model            String      @db.VarChar(120)
+  deviceValueCents Int         @map("device_value_cents")
+  expiresAt        DateTime    @map("expires_at")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  items            QuoteItem[]
+  policies         Policy[]
+
+  @@map("quotes")
+}
+
+model QuoteItem {
+  quoteId           String @map("quote_id")
+  planId            String @map("plan_id")
+  monthlyPriceCents Int    @map("monthly_price_cents")
+  quote             Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  plan              Plan   @relation(fields: [planId], references: [id])
+
+  @@id([quoteId, planId])
+  @@map("quote_items")
+}
+
+model Policy {
+  id                String        @id @default(uuid())
+  number            String        @unique @db.VarChar(20)
+  userId            String        @map("user_id")
+  deviceId          String        @map("device_id")
+  planId            String        @map("plan_id")
+  quoteId           String        @map("quote_id")
+  status            PolicyStatus  @default(AGUARDANDO_PAGAMENTO)
+  monthlyPriceCents Int           @map("monthly_price_cents")
+  deviceValueCents  Int           @map("device_value_cents")
+  /// Início da primeira vigência: base da carência (RN07).
+  startsAt          DateTime?     @map("starts_at")
+  /// Fim do ciclo pago atual.
+  endsAt            DateTime?     @map("ends_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+  user              User          @relation(fields: [userId], references: [id])
+  device            Device        @relation(fields: [deviceId], references: [id])
+  plan              Plan          @relation(fields: [planId], references: [id])
+  quote             Quote         @relation(fields: [quoteId], references: [id])
+  subscription      Subscription?
+  claims            Claim[]
+  tickets           Ticket[]
+
+  @@index([userId, status])
+  @@map("policies")
+}
+
+model Subscription {
+  id                 String             @id @default(uuid())
+  policyId           String             @unique @map("policy_id")
+  method             PaymentMethod
+  status             SubscriptionStatus @default(PENDENTE)
+  /// Número do ciclo pago atual (0 = nenhum pago ainda).
+  cycle              Int                @default(0)
+  currentPeriodStart DateTime?          @map("current_period_start")
+  currentPeriodEnd   DateTime?          @map("current_period_end")
+  nextBillingAt      DateTime?          @map("next_billing_at")
+  cancelAtPeriodEnd  Boolean            @default(false) @map("cancel_at_period_end")
+  canceledAt         DateTime?          @map("canceled_at")
+  delinquentSince    DateTime?          @map("delinquent_since")
+  reminderSentCycle  Int                @default(0) @map("reminder_sent_cycle")
+  /// Troca de plano agendada para o próximo ciclo (US15).
+  pendingPlanId      String?            @map("pending_plan_id")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  policy             Policy             @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  pendingPlan        Plan?              @relation("PendingPlan", fields: [pendingPlanId], references: [id])
+  payments           Payment[]
+
+  @@index([status, nextBillingAt])
+  @@map("subscriptions")
+}
+
+model Payment {
+  id             String         @id @default(uuid())
+  purpose        PaymentPurpose
+  subscriptionId String?        @map("subscription_id")
+  claimId        String?        @map("claim_id")
+  /// Ciclo a que a mensalidade se refere (idempotência: assinatura + ciclo + tentativa).
+  cycle          Int?
+  attempt        Int            @default(1)
+  amountCents    Int            @map("amount_cents")
+  method         PaymentMethod
+  status         PaymentStatus  @default(PENDENTE)
+  gatewayId      String?        @unique @map("gateway_id") @db.VarChar(120)
+  pixQrCode      String?        @map("pix_qr_code") @db.Text
+  checkoutUrl    String?        @map("checkout_url") @db.VarChar(500)
+  failureReason  String?        @map("failure_reason") @db.VarChar(255)
+  paidAt         DateTime?      @map("paid_at")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  subscription   Subscription?  @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  claim          Claim?         @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  @@unique([subscriptionId, cycle, attempt])
+  @@index([claimId])
+  @@map("payments")
+}
+
+/// Eventos de webhook já processados (idempotência).
+model WebhookEvent {
+  id         String   @id @db.VarChar(160)
+  type       String   @db.VarChar(60)
+  receivedAt DateTime @default(now()) @map("received_at")
+
+  @@map("webhook_events")
+}
+
+model Claim {
+  id              String          @id @default(uuid())
+  number          String          @unique @db.VarChar(20)
+  policyId        String          @map("policy_id")
+  userId          String          @map("user_id")
+  type            CoverageCode
+  occurredAt      DateTime        @map("occurred_at")
+  location        String          @db.VarChar(200)
+  description     String          @db.Text
+  status          ClaimStatus     @default(ABERTO)
+  deductibleCents Int             @map("deductible_cents")
+  decisionReason  String?         @map("decision_reason") @db.VarChar(500)
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  policy          Policy          @relation(fields: [policyId], references: [id])
+  user            User            @relation(fields: [userId], references: [id])
+  documents       ClaimDocument[]
+  events          ClaimEvent[]
+  payments        Payment[]
+
+  @@index([userId, status])
+  @@index([status, createdAt])
+  @@map("claims")
+}
+
+model ClaimDocument {
+  id           String   @id @default(uuid())
+  claimId      String   @map("claim_id")
+  originalName String   @map("original_name") @db.VarChar(255)
+  mimeType     String   @map("mime_type") @db.VarChar(100)
+  sizeBytes    Int      @map("size_bytes")
+  storagePath  String   @map("storage_path") @db.VarChar(500)
+  createdAt    DateTime @default(now()) @map("created_at")
+  claim        Claim    @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  @@map("claim_documents")
+}
+
+model ClaimEvent {
+  id         String       @id @default(uuid())
+  claimId    String       @map("claim_id")
+  fromStatus ClaimStatus? @map("from_status")
+  toStatus   ClaimStatus  @map("to_status")
+  actorId    String?      @map("actor_id")
+  note       String?      @db.VarChar(500)
+  createdAt  DateTime     @default(now()) @map("created_at")
+  claim      Claim        @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  actor      User?        @relation(fields: [actorId], references: [id])
+
+  @@index([claimId, createdAt])
+  @@map("claim_events")
+}
+
+model Ticket {
+  id        String          @id @default(uuid())
+  userId    String          @map("user_id")
+  policyId  String?         @map("policy_id")
+  subject   String          @db.VarChar(150)
+  category  TicketCategory
+  status    TicketStatus    @default(ABERTO)
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+  user      User            @relation(fields: [userId], references: [id])
+  policy    Policy?         @relation(fields: [policyId], references: [id])
+  messages  TicketMessage[]
+
+  @@index([userId, status])
+  @@index([status, updatedAt])
+  @@map("tickets")
+}
+
+model TicketMessage {
+  id        String   @id @default(uuid())
+  ticketId  String   @map("ticket_id")
+  authorId  String   @map("author_id")
+  body      String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author    User     @relation(fields: [authorId], references: [id])
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_messages")
+}
+
+model Faq {
+  id        String @id @default(uuid())
+  question  String @db.VarChar(255)
+  answer    String @db.Text
+  sortOrder Int    @default(0) @map("sort_order")
+
+  @@map("faqs")
+}
+
+model Feedback {
+  id        String         @id @default(uuid())
+  userId    String         @map("user_id")
+  rating    Int
+  comment   String?        @db.VarChar(500)
+  status    FeedbackStatus @default(PENDENTE)
+  createdAt DateTime       @default(now()) @map("created_at")
+  user      User           @relation(fields: [userId], references: [id])
+
+  @@index([status, createdAt])
+  @@map("feedbacks")
+}

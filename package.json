@@ -1,0 +1,35 @@
+{
+  "name": "seguradora-celular",
+  "private": true,
+  "description": "SaaS de seguro de celular – monorepo (backend NestJS + frontend React)",
+  "scripts": {
+    "prepare": "husky",
+    "install:all": "npm install && npm install --prefix backend && npm install --prefix frontend",
+    "dev:api": "npm run start:dev --prefix backend",
+    "dev:web": "npm run dev --prefix frontend",
+    "db:local": "npm run db:local --prefix backend",
+    "lint": "npm run lint --prefix backend && npm run lint --prefix frontend",
+    "test": "npm test --prefix backend && npm run test:e2e --prefix backend && npm test --prefix frontend",
+    "test:e2e": "npm run test:e2e --prefix frontend"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.5.0",
+    "@commitlint/config-conventional": "^19.5.0",
+    "husky": "^9.1.6",
+    "lint-staged": "^15.2.10"
+  },
+  "lint-staged": {
+    "backend/{src,test,prisma}/**/*.ts": [
+      "npm exec --prefix backend -- prettier --write --config backend/.prettierrc",
+      "npm exec --prefix backend -- eslint --fix --config backend/.eslintrc.js --resolve-plugins-relative-to backend"
+    ],
+    "frontend/{src,e2e}/**/*.{ts,tsx}": [
+      "npm exec --prefix frontend -- prettier --write --config frontend/.prettierrc"
+    ]
+  },
+  "commitlint": {
+    "extends": [
+      "@commitlint/config-conventional"
+    ]
+  }
+}
